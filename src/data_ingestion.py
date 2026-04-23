@@ -1,7 +1,7 @@
 """
 data_ingestion.py
 -----------------
-Loads the raw Flight Price Prediction dataset from data/raw/Clean_Dataset.csv
+Loads the raw Flight Price Prediction dataset from data/raw/clean_dataset.csv
 and returns it as a pandas DataFrame.
 
 This module is the first step of the ML pipeline. It does ONE thing:
@@ -14,14 +14,14 @@ import pandas as pd
 import sys
 
 
-def load_data(file_path: str = "data/raw/Clean_Dataset.csv") -> pd.DataFrame:
+def load_data(file_path: str = "data/raw/clean_dataset.csv") -> pd.DataFrame:
     """
     Load raw dataset from the given CSV file path.
 
     Parameters
     ----------
     file_path : str
-        Path to the raw CSV file. Defaults to 'data/raw/Clean_Dataset.csv'.
+        Path to the raw CSV file. Defaults to 'data/raw/clean_dataset.csv'.
 
     Returns
     -------

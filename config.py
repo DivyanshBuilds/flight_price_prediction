@@ -1,7 +1,7 @@
 # config.py
 
 DATA_CONFIG = {
-    'raw_data_path': 'data/raw/Clean_Dataset.csv',
+    'raw_data_path': 'data/raw/clean_dataset.csv',
     'processed_data_path': 'data/processed/cleaned_data.csv',
     'X_train_path': 'data/processed/X_train.csv',
     'X_test_path': 'data/processed/X_test.csv',
