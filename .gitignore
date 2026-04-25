@@ -6,5 +6,5 @@ venv/
 *.h5
 *.pt
 *.pth
-data/
+data/prpocessed/
 models/

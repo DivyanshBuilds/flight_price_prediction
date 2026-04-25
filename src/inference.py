@@ -1,32 +1,28 @@
 """
 inference.py
 ------------
-Inference utilities for Flight Price Prediction.
-
-This module loads the saved preprocessing artifacts and trained models,
-transforms raw user inputs into model-ready features, and returns the
-predicted ticket price in the original rupee scale.
+Loads the trained model and preprocessors, transforms user input,
+and returns predicted flight price in rupees.
 """
 
-from __future__ import annotations
-
 import os
-from dataclasses import dataclass
-from typing import Any
-
-import joblib
 import numpy as np
 import pandas as pd
+import joblib
 from tensorflow.keras.models import load_model
 
-from data_transformer import NUMERICAL_COLUMNS, ONEHOT_COLUMNS
 
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
-
-DEFAULT_MODEL_TYPE = "ann"
-VALID_MODEL_TYPES = {"ann", "linear"}
+# ---------------------------------------------------------------------
+# Constants (hardcoded from your training pipeline)
+# ---------------------------------------------------------------------
+NUMERICAL_COLUMNS = ["duration", "days_left"]
+ONEHOT_COLUMNS = [
+    "airline",
+    "source_city",
+    "departure_time",
+    "arrival_time",
+    "destination_city",
+]
 
 REQUIRED_FIELDS = [
     "airline",
@@ -41,197 +37,161 @@ REQUIRED_FIELDS = [
 ]
 
 
+# ---------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
+
+
+# ---------------------------------------------------------------------
+# Global cache (load once, reuse forever)
+# ---------------------------------------------------------------------
+_ARTIFACTS = None
+
+
 class InferenceError(Exception):
-    """Raised when prediction-time validation or artifact loading fails."""
+    """Raised when prediction fails."""
+    pass
 
 
-@dataclass
-class InferenceArtifacts:
-    """Container for everything needed during prediction."""
+def load_artifacts():
+    """Load all models and preprocessors once and cache them."""
+    global _ARTIFACTS
+    
+    if _ARTIFACTS is not None:
+        return _ARTIFACTS
+    
+    try:
+        # Load model from models/
+        ann_model = load_model(os.path.join(MODELS_DIR, "ann_model.keras"))
+        
+        # Load preprocessors from models/
+        ohe = joblib.load(os.path.join(MODELS_DIR, "ohe.pkl"))
+        ord_enc_class = joblib.load(os.path.join(MODELS_DIR, "ordinal_encoder_class.pkl"))
+        ord_enc_stops = joblib.load(os.path.join(MODELS_DIR, "ordinal_encoder_stops.pkl"))
+        scaler = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
+        
+        # Get feature column order from data/processed/X_train.csv
+        X_train = pd.read_csv(os.path.join(DATA_DIR, "X_train.csv"), nrows=0)
+        feature_columns = X_train.columns.tolist()
+        
+        _ARTIFACTS = {
+            "model": ann_model,
+            "ohe": ohe,
+            "ord_enc_class": ord_enc_class,
+            "ord_enc_stops": ord_enc_stops,
+            "scaler": scaler,
+            "feature_columns": feature_columns,
+        }
+        
+        print("[inference] Artifacts loaded successfully.")
+        return _ARTIFACTS
+        
+    except FileNotFoundError as e:
+        raise InferenceError(f"Model file not found: {e}. Run training pipeline first.")
+    except Exception as e:
+        raise InferenceError(f"Failed to load artifacts: {e}")
 
-    ordinal_encoder_class: Any
-    ordinal_encoder_stops: Any
-    one_hot_encoder: Any
-    scaler: Any
-    feature_columns: list[str]
-    ann_model: Any | None = None
-    linear_model: Any | None = None
+
+def validate_input(data):
+    """Check that all required fields are present and valid."""
+    # Check all fields exist
+    for field in REQUIRED_FIELDS:
+        if field not in data or data[field] in (None, ""):
+            raise InferenceError(f"Missing required field: '{field}'")
+    
+    # Validate numeric fields
+    try:
+        duration = float(data["duration"])
+        if duration <= 0:
+            raise InferenceError("Duration must be greater than 0")
+    except (TypeError, ValueError):
+        raise InferenceError("Duration must be a valid number")
+    
+    try:
+        days_left = int(data["days_left"])
+        if days_left < 0:
+            raise InferenceError("Days left must be 0 or greater")
+    except (TypeError, ValueError):
+        raise InferenceError("Days left must be a valid integer")
+    
+    return True
 
 
-def _artifact_path(filename: str) -> str:
-    """Build an absolute path inside data/processed/."""
-    return os.path.join(PROCESSED_DIR, filename)
+def preprocess_input(data, artifacts):
+    """Transform raw user input into model-ready features."""
+    # Create dataframe from input
+    input_df = pd.DataFrame([data], columns=REQUIRED_FIELDS)
+    
+    # Work on a copy
+    df = input_df.copy()
+    
+    # Encode 'class' (Economy=0, Business=1)
+    df["class"] = artifacts["ord_enc_class"].transform(df[["class"]])
+    
+    # Encode 'stops' (zero=0, one=1, two_or_more=2)
+    df["stops"] = artifacts["ord_enc_stops"].transform(df[["stops"]])
+    
+    # One-hot encode the 5 categorical columns
+    ohe_array = artifacts["ohe"].transform(df[ONEHOT_COLUMNS])
+    ohe_cols = artifacts["ohe"].get_feature_names_out(ONEHOT_COLUMNS)
+    ohe_df = pd.DataFrame(ohe_array, columns=ohe_cols, index=df.index)
+    
+    # Drop original categorical columns and add encoded ones
+    df = pd.concat([df.drop(columns=ONEHOT_COLUMNS), ohe_df], axis=1)
+    
+    # Scale numerical columns
+    df[NUMERICAL_COLUMNS] = artifacts["scaler"].transform(df[NUMERICAL_COLUMNS])
+    
+    # Reorder columns to match training
+    df = df.reindex(columns=artifacts["feature_columns"], fill_value=0.0)
+    
+    return df
 
 
-def _ensure_artifact_exists(filename: str) -> str:
-    """Return artifact path if present, otherwise raise a helpful error."""
-    path = _artifact_path(filename)
-    if not os.path.exists(path):
-        raise InferenceError(
-            f"Required artifact not found: {path}. Run the training pipeline first."
-        )
-    return path
-
-
-def load_inference_artifacts(model_type: str = DEFAULT_MODEL_TYPE) -> InferenceArtifacts:
+def predict_price(data):
     """
-    Load preprocessors, feature schema, and the requested trained model.
-
+    Main prediction function.
+    
     Parameters
     ----------
-    model_type : str
-        Either 'ann' or 'linear'.
+    data : dict
+        User input with keys: airline, source_city, departure_time, stops,
+        arrival_time, destination_city, class, duration, days_left
+    
+    Returns
+    -------
+    dict
+        Contains 'predicted_price' (float) and 'model_name' (str)
     """
-    model_type = model_type.lower()
-    if model_type not in VALID_MODEL_TYPES:
-        raise InferenceError(
-            f"Unsupported model_type='{model_type}'. Expected one of {sorted(VALID_MODEL_TYPES)}."
-        )
-
-    ordinal_encoder_class = joblib.load(_ensure_artifact_exists("ordinal_encoder_class.pkl"))
-    ordinal_encoder_stops = joblib.load(_ensure_artifact_exists("ordinal_encoder_stops.pkl"))
-    one_hot_encoder = joblib.load(_ensure_artifact_exists("ohe.pkl"))
-    scaler = joblib.load(_ensure_artifact_exists("scaler.pkl"))
-
-    feature_columns = pd.read_csv(_ensure_artifact_exists("X_train.csv"), nrows=0).columns.tolist()
-
-    artifacts = InferenceArtifacts(
-        ordinal_encoder_class=ordinal_encoder_class,
-        ordinal_encoder_stops=ordinal_encoder_stops,
-        one_hot_encoder=one_hot_encoder,
-        scaler=scaler,
-        feature_columns=feature_columns,
-    )
-
-    if model_type == "ann":
-        artifacts.ann_model = load_model(_ensure_artifact_exists("ann_model.keras"))
-    else:
-        artifacts.linear_model = joblib.load(_ensure_artifact_exists("linear_model.pkl"))
-
-    return artifacts
-
-
-def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a trimmed payload with consistent value types."""
-    normalized: dict[str, Any] = {}
-
-    for field in REQUIRED_FIELDS:
-        if field not in payload:
-            raise InferenceError(f"Missing required field: '{field}'.")
-
-        value = payload[field]
-        if isinstance(value, str):
-            value = value.strip()
-
-        if value in ("", None):
-            raise InferenceError(f"Field '{field}' cannot be empty.")
-
-        normalized[field] = value
-
-    try:
-        normalized["duration"] = float(normalized["duration"])
-    except (TypeError, ValueError) as exc:
-        raise InferenceError("Field 'duration' must be a numeric value.") from exc
-
-    try:
-        normalized["days_left"] = float(normalized["days_left"])
-    except (TypeError, ValueError) as exc:
-        raise InferenceError("Field 'days_left' must be a numeric value.") from exc
-
-    if normalized["duration"] <= 0:
-        raise InferenceError("Field 'duration' must be greater than 0.")
-
-    if normalized["days_left"] < 0:
-        raise InferenceError("Field 'days_left' must be 0 or greater.")
-
-    return normalized
-
-
-def _validate_categories(payload: dict[str, Any], artifacts: InferenceArtifacts) -> None:
-    """Ensure incoming categories are compatible with fitted encoders."""
-    class_values = set(artifacts.ordinal_encoder_class.categories_[0].tolist())
-    stops_values = set(artifacts.ordinal_encoder_stops.categories_[0].tolist())
-
-    if payload["class"] not in class_values:
-        raise InferenceError(
-            f"Invalid value for 'class': {payload['class']}. Expected one of {sorted(class_values)}."
-        )
-
-    if payload["stops"] not in stops_values:
-        raise InferenceError(
-            f"Invalid value for 'stops': {payload['stops']}. Expected one of {sorted(stops_values)}."
-        )
-
-    for column, categories in zip(
-        ONEHOT_COLUMNS, artifacts.one_hot_encoder.categories_, strict=True
-    ):
-        allowed_values = set(categories.tolist())
-        if payload[column] not in allowed_values:
-            raise InferenceError(
-                f"Invalid value for '{column}': {payload[column]}. "
-                f"Expected one of {sorted(allowed_values)}."
-            )
-
-
-def preprocess_input(
-    payload: dict[str, Any],
-    artifacts: InferenceArtifacts,
-) -> pd.DataFrame:
-    """
-    Convert raw user input into the exact feature matrix expected by the model.
-    """
-    payload = _normalize_payload(payload)
-    _validate_categories(payload, artifacts)
-
-    input_df = pd.DataFrame([payload], columns=REQUIRED_FIELDS)
-    processed_df = input_df.copy()
-
-    processed_df["class"] = artifacts.ordinal_encoder_class.transform(processed_df[["class"]])
-    processed_df["stops"] = artifacts.ordinal_encoder_stops.transform(processed_df[["stops"]])
-
-    encoded_array = artifacts.one_hot_encoder.transform(processed_df[ONEHOT_COLUMNS])
-    encoded_columns = artifacts.one_hot_encoder.get_feature_names_out(ONEHOT_COLUMNS)
-    encoded_df = pd.DataFrame(encoded_array, columns=encoded_columns, index=processed_df.index)
-
-    processed_df = pd.concat(
-        [processed_df.drop(columns=ONEHOT_COLUMNS), encoded_df],
-        axis=1,
-    )
-
-    processed_df[NUMERICAL_COLUMNS] = artifacts.scaler.transform(processed_df[NUMERICAL_COLUMNS])
-    processed_df = processed_df.reindex(columns=artifacts.feature_columns, fill_value=0.0)
-
-    return processed_df
-
-
-def predict_price(
-    payload: dict[str, Any],
-    model_type: str = DEFAULT_MODEL_TYPE,
-) -> dict[str, float | str]:
-    """
-    Run end-to-end prediction and return the price in original rupee scale.
-    """
-    artifacts = load_inference_artifacts(model_type=model_type)
-    processed_df = preprocess_input(payload, artifacts)
-
-    if model_type == "ann":
-        prediction_log = float(artifacts.ann_model.predict(processed_df, verbose=0).flatten()[0])
-        model_name = "ANN"
-    else:
-        prediction_log = float(artifacts.linear_model.predict(processed_df)[0])
-        model_name = "Linear Regression"
-
+    # Load artifacts (cached after first call)
+    artifacts = load_artifacts()
+    
+    # Validate input
+    validate_input(data)
+    
+    # Transform input
+    X = preprocess_input(data, artifacts)
+    
+    # Predict in log-space
+    prediction_log = artifacts["model"].predict(X, verbose=0).flatten()[0]
+    
+    # Convert back to rupees
     predicted_price = float(np.expm1(prediction_log))
-
+    
     return {
         "predicted_price": round(predicted_price, 2),
-        "model_type": model_type,
-        "model_name": model_name,
+        "model_name": "ANN (R² = 96.7%)",
     }
 
 
+# ---------------------------------------------------------------------
+# Test when run directly
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
-    sample_payload = {
+    test_input = {
         "airline": "Vistara",
         "source_city": "Delhi",
         "departure_time": "Morning",
@@ -242,10 +202,11 @@ if __name__ == "__main__":
         "duration": 2.17,
         "days_left": 15,
     }
-
+    
     try:
-        result = predict_price(sample_payload)
-        print("Prediction successful.")
-        print(result)
-    except InferenceError as error:
-        print(f"Inference failed: {error}")
+        result = predict_price(test_input)
+        print("✓ Prediction successful!")
+        print(f"  Predicted price: ₹{result['predicted_price']:,.2f}")
+        print(f"  Model: {result['model_name']}")
+    except InferenceError as e:
+        print(f"✗ Prediction failed: {e}")

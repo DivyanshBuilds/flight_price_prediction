@@ -40,7 +40,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 # Constants
 # ---------------------------------------------------------------------
 PROCESSED_DIR = "data/processed"
-MODELS_DIR = "data/processed"   # keeping all artifacts in one place
+MODELS_DIR = "models/"   # keeping all artifacts in one place
 
 # Reproducibility
 SEED = 42

@@ -2,7 +2,11 @@
 data_transformer.py
 -------------------
 Transforms the raw Flight Price Prediction dataset into model-ready form:
-cleans, splits, encodes, scales, and saves all artifacts to data/processed/.
+cleans, splits, encodes, scales, and saves all artifacts.
+
+Output locations:
+    - data/processed/ -> X_train.csv, X_test.csv, y_train.csv, y_test.csv
+    - models/         -> encoders, scalers (ohe.pkl, ordinal_encoder_*.pkl, scaler.pkl)
 
 Pipeline order (strict, to prevent data leakage):
     1. Load raw data
@@ -12,7 +16,7 @@ Pipeline order (strict, to prevent data leakage):
     5. Log-transform y (AFTER split)
     6. Encode categoricals (fit on train only)
     7. Scale numericals (fit on train only)
-    8. Save all CSVs and encoder/scaler pickles
+    8. Save CSVs to data/processed/ and pickles to models/
 
 Can be run standalone OR imported and called from main.py.
 """
@@ -31,7 +35,8 @@ from data_ingestion import load_data
 # ---------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------
-OUTPUT_DIR = "data/processed"
+DATA_OUTPUT_DIR = "data/processed"  # CSVs go here
+MODELS_OUTPUT_DIR = "models"        # Pickles go here
 
 TARGET_COLUMN = "price"
 COLUMNS_TO_DROP = ["Unnamed: 0", "flight"]
@@ -191,25 +196,29 @@ def save_artifacts(
     ohe: OneHotEncoder,
     scaler: StandardScaler,
 ) -> None:
-    """Save all CSVs and encoder/scaler pickles to data/processed/."""
+    """
+    Save CSVs to data/processed/ and pickles to models/.
+    """
     print("\n[data_transformer] --- Saving artifacts ---")
 
     try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        # Create both directories
+        os.makedirs(DATA_OUTPUT_DIR, exist_ok=True)
+        os.makedirs(MODELS_OUTPUT_DIR, exist_ok=True)
 
-        # Data splits
-        X_train.to_csv(os.path.join(OUTPUT_DIR, "X_train.csv"), index=False)
-        X_test.to_csv(os.path.join(OUTPUT_DIR, "X_test.csv"), index=False)
-        y_train.to_csv(os.path.join(OUTPUT_DIR, "y_train.csv"), index=False, header=True)
-        y_test.to_csv(os.path.join(OUTPUT_DIR, "y_test.csv"), index=False, header=True)
+        # Save CSVs to data/processed/
+        X_train.to_csv(os.path.join(DATA_OUTPUT_DIR, "X_train.csv"), index=False)
+        X_test.to_csv(os.path.join(DATA_OUTPUT_DIR, "X_test.csv"), index=False)
+        y_train.to_csv(os.path.join(DATA_OUTPUT_DIR, "y_train.csv"), index=False, header=True)
+        y_test.to_csv(os.path.join(DATA_OUTPUT_DIR, "y_test.csv"), index=False, header=True)
+        print(f"[data_transformer] CSVs saved to: {DATA_OUTPUT_DIR}/")
 
-        # Encoders and scaler
-        joblib.dump(ord_enc_class, os.path.join(OUTPUT_DIR, "ordinal_encoder_class.pkl"))
-        joblib.dump(ord_enc_stops, os.path.join(OUTPUT_DIR, "ordinal_encoder_stops.pkl"))
-        joblib.dump(ohe, os.path.join(OUTPUT_DIR, "ohe.pkl"))
-        joblib.dump(scaler, os.path.join(OUTPUT_DIR, "scaler.pkl"))
-
-        print(f"[data_transformer] All artifacts saved to: {OUTPUT_DIR}/")
+        # Save pickles to models/
+        joblib.dump(ord_enc_class, os.path.join(MODELS_OUTPUT_DIR, "ordinal_encoder_class.pkl"))
+        joblib.dump(ord_enc_stops, os.path.join(MODELS_OUTPUT_DIR, "ordinal_encoder_stops.pkl"))
+        joblib.dump(ohe, os.path.join(MODELS_OUTPUT_DIR, "ohe.pkl"))
+        joblib.dump(scaler, os.path.join(MODELS_OUTPUT_DIR, "scaler.pkl"))
+        print(f"[data_transformer] Encoders/scalers saved to: {MODELS_OUTPUT_DIR}/")
 
     except Exception as e:
         print(f"[data_transformer] ERROR: Failed to save artifacts — {e}")

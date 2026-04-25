@@ -3,96 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flight Price Predictor</title>
+    <meta name="description" content="Predict flight ticket prices using machine learning. Get instant price estimates for domestic Indian flights.">
+    <title>Flight Price Predictor | ML Project</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <main class="page">
+        <!-- Hero Section -->
         <section class="hero">
-            <p class="eyebrow">Machine Learning Project</p>
+            <p class="eyebrow">Machine Learning Portfolio Project</p>
             <h1>Flight Price Predictor</h1>
             <p class="subtitle">
-                Enter your flight details and get an estimated ticket price instantly.
+                Enter your flight details below and get an instant price estimate powered by a neural network trained on 300,000+ flights.
             </p>
             <div class="metric-badge">
-                <span class="metric-label">Model R Square</span>
+                <span class="metric-label">Model Accuracy (R²)</span>
                 <span class="metric-value">96.7%</span>
             </div>
         </section>
 
+        <!-- Prediction Form -->
         <section class="card">
             <form action="{{ url_for('predict') }}" method="post" class="prediction-form">
                 <div class="grid">
+                    <!-- Airline -->
                     <div class="field">
                         <label for="airline">Airline</label>
                         <select id="airline" name="airline" required>
                             <option value="">Select airline</option>
                             {% for item in options.airline %}
-                            <option value="{{ item }}" {% if form_data.get('airline') == item %}selected{% endif %}>{{ item }}</option>
+                            <option value="{{ item }}" {% if form_data.get('airline') == item %}selected{% endif %}>
+                                {{ item.replace('_', ' ') }}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
 
+                    <!-- Source City -->
                     <div class="field">
-                        <label for="source_city">Source City</label>
+                        <label for="source_city">From</label>
                         <select id="source_city" name="source_city" required>
-                            <option value="">Select source city</option>
+                            <option value="">Select departure city</option>
                             {% for item in options.source_city %}
-                            <option value="{{ item }}" {% if form_data.get('source_city') == item %}selected{% endif %}>{{ item }}</option>
+                            <option value="{{ item }}" {% if form_data.get('source_city') == item %}selected{% endif %}>
+                                {{ item }}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
 
+                    <!-- Destination City -->
                     <div class="field">
-                        <label for="destination_city">Destination City</label>
+                        <label for="destination_city">To</label>
                         <select id="destination_city" name="destination_city" required>
                             <option value="">Select destination city</option>
                             {% for item in options.destination_city %}
-                            <option value="{{ item }}" {% if form_data.get('destination_city') == item %}selected{% endif %}>{{ item }}</option>
+                            <option value="{{ item }}" {% if form_data.get('destination_city') == item %}selected{% endif %}>
+                                {{ item }}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
 
-                    <div class="field">
-                        <label for="class">Class</label>
-                        <select id="class" name="class" required>
-                            <option value="">Select class</option>
-                            {% for item in options.class %}
-                            <option value="{{ item }}" {% if form_data.get('class') == item %}selected{% endif %}>{{ item }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
+                    <!-- Departure Time -->
                     <div class="field">
                         <label for="departure_time">Departure Time</label>
                         <select id="departure_time" name="departure_time" required>
                             <option value="">Select departure time</option>
                             {% for item in options.departure_time %}
-                            <option value="{{ item }}" {% if form_data.get('departure_time') == item %}selected{% endif %}>{{ item }}</option>
+                            <option value="{{ item }}" {% if form_data.get('departure_time') == item %}selected{% endif %}>
+                                {{ item.replace('_', ' ').title() }}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
 
+                    <!-- Arrival Time -->
                     <div class="field">
                         <label for="arrival_time">Arrival Time</label>
                         <select id="arrival_time" name="arrival_time" required>
                             <option value="">Select arrival time</option>
                             {% for item in options.arrival_time %}
-                            <option value="{{ item }}" {% if form_data.get('arrival_time') == item %}selected{% endif %}>{{ item }}</option>
+                            <option value="{{ item }}" {% if form_data.get('arrival_time') == item %}selected{% endif %}>
+                                {{ item.replace('_', ' ').title() }}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
 
+                    <!-- Stops -->
                     <div class="field">
                         <label for="stops">Stops</label>
                         <select id="stops" name="stops" required>
                             <option value="">Select stops</option>
                             {% for item in options.stops %}
-                            <option value="{{ item }}" {% if form_data.get('stops') == item %}selected{% endif %}>{{ item }}</option>
+                            <option value="{{ item }}" {% if form_data.get('stops') == item %}selected{% endif %}>
+                                {% if item == 'zero' %}Non-stop
+                                {% elif item == 'one' %}1 Stop
+                                {% elif item == 'two_or_more' %}2+ Stops
+                                {% else %}{{ item }}
+                                {% endif %}
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
 
+                    <!-- Class -->
+                    <div class="field">
+                        <label for="class">Class</label>
+                        <select id="class" name="class" required>
+                            <option value="">Select class</option>
+                            {% for item in options.class %}
+                            <option value="{{ item }}" {% if form_data.get('class') == item %}selected{% endif %}>
+                                {{ item }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Duration -->
                     <div class="field">
                         <label for="duration">Duration (hours)</label>
                         <input
@@ -101,41 +130,47 @@
                             type="number"
                             step="0.01"
                             min="0.01"
-                            placeholder="e.g. 2.17"
+                            max="24"
+                            placeholder="e.g., 2.5"
                             value="{{ form_data.get('duration', '') }}"
                             required
                         >
                     </div>
 
+                    <!-- Days Left -->
                     <div class="field">
-                        <label for="days_left">Days Left</label>
+                        <label for="days_left">Days Until Departure</label>
                         <input
                             id="days_left"
                             name="days_left"
                             type="number"
                             min="0"
+                            max="365"
                             step="1"
-                            placeholder="e.g. 15"
+                            placeholder="e.g., 15"
                             value="{{ form_data.get('days_left', '') }}"
                             required
                         >
                     </div>
                 </div>
 
-                <button type="submit" class="submit-btn">Predict Price</button>
+                <button type="submit" class="submit-btn">Predict Price →</button>
             </form>
 
+            <!-- Error Message -->
             {% if error %}
-            <div class="message error">
-                <strong>Error:</strong> {{ error }}
+            <div class="message error" role="alert">
+                <strong>⚠ Error</strong>
+                <p>{{ error }}</p>
             </div>
             {% endif %}
 
+            <!-- Success Message (Prediction Result) -->
             {% if prediction %}
-            <div class="message success">
-                <p class="result-label">Predicted Fare</p>
-                <h2>Rs. {{ "{:,.2f}".format(prediction.predicted_price) }}</h2>
-                <p>Model used: {{ prediction.model_name }}</p>
+            <div class="message success" role="status">
+                <p class="result-label">Estimated Ticket Price</p>
+                <h2>₹{{ "{:,.2f}".format(prediction.predicted_price) }}</h2>
+                <p>{{ prediction.model_name }}</p>
             </div>
             {% endif %}
         </section>
