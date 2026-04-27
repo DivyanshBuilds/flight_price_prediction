@@ -65,7 +65,7 @@ def load_artifacts():
     
     try:
         # Load model from models/
-        ann_model = load_model(os.path.join(MODELS_DIR, "ann_model.keras"))
+        ann_model = load_model(os.path.join(MODELS_DIR, "ann_model.h5"))
         
         # Load preprocessors from models/
         ohe = joblib.load(os.path.join(MODELS_DIR, "ohe.pkl"))
