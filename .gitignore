@@ -3,7 +3,6 @@ __pycache__/
 .env
 venv/
 .env/
-*.h5
 *.pt
 *.pth
 data/processed/X_test.csv
